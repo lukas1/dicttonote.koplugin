@@ -1,0 +1,68 @@
+# Publishes this KOReader plugin as a zip release.
+#
+# Triggered by pushing a version tag (e.g. v2025.11.25), which creates a
+# GitHub Release with the installable plugin zip as an asset. The zip
+# contains the plugin folder (dicttonote.koplugin/) so it can be unzipped
+# straight into KOReader's plugins/ directory; README and workflow files
+# are excluded. A manual run (workflow_dispatch) is possible too, e.g. for
+# dev builds not tied to a tag.
+name: Publish koplugin
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label (e.g. 2025.11.25). Defaults to dev-<date>."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="dev-$(date -u +%Y.%m.%d)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Build plugin zip
+        run: |
+          # The repo root is the plugin folder itself; zip it from the parent
+          # directory so the archive contains dicttonote.koplugin/ at its top
+          # level, as KOReader (and the plugin manager) expect.
+          PLUGIN_DIR="$(basename "$GITHUB_WORKSPACE")"
+          cd "$GITHUB_WORKSPACE/.."
+          zip -r "$GITHUB_WORKSPACE/$PLUGIN_DIR-${{ steps.ver.outputs.version }}.zip" "$PLUGIN_DIR" \
+            -x "$PLUGIN_DIR/.git/*" \
+            -x "$PLUGIN_DIR/.github/*" \
+            -x "$PLUGIN_DIR/README.md" \
+            -x "$PLUGIN_DIR/.gitignore" \
+            -x "*/.DS_Store"
+          echo "--- zip contents ---"
+          unzip -l "$GITHUB_WORKSPACE/$PLUGIN_DIR-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dicttonote.koplugin-*.zip
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
